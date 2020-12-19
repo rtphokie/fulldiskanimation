@@ -11,15 +11,24 @@ import concurrent.futures
 # https://github.com/ryanseddon/earthin24/blob/master/create_video.sh
 # https://downlinkapp.com/sources.json
 # https://eumetview.eumetsat.int/static-images/latestImages/
-fulldiskurls = {'goes-16': 'https://cdn.star.nesdis.noaa.gov/GOES16/ABI/FD/GEOCOLOR/5424x5424.jpg',
-                'goes-17': 'https://cdn.star.nesdis.noaa.gov/GOES17/ABI/FD/GEOCOLOR/5424x5424.jpg',
-                'himawari': 'http://rammb.cira.colostate.edu/ramsdis/online/images/latest_hi_res/himawari-8/full_disk_ahi_true_color.jpg',
-                }
-maxprocesses=5
-# image_width=5424
-# image_height=5424
-image_width=640
-image_height=640
+satinfo = {'goes-16': {'url': 'https://cdn.star.nesdis.noaa.gov/GOES16/ABI/FD/GEOCOLOR/5424x5424.jpg',
+                       'longitude': '75.2 W',
+                       'name': 'GOES-16'},
+           'goes-17': {'url': 'https://cdn.star.nesdis.noaa.gov/GOES17/ABI/FD/GEOCOLOR/5424x5424.jpg',
+                       'longitude': '137.2 W',
+                       'name': 'GOES-17'},
+           'himawari': {'url': 'http://rammb.cira.colostate.edu/ramsdis/online/images/latest_hi_res/himawari-8/full_disk_ahi_true_color.jpg',
+                        'longitude': '140.7 E',
+                       'name': 'Himawari-8'},
+           'meteosat-11': {'longitude': '0',
+                          'name': 'METEOSAT-11'},
+           'meteosat-8': {'longitude': '41.5 E',
+                       'name': 'METEOSAT-8'},
+           }
+
+maxprocesses=6
+image_width=5424
+image_height=5424
 
 def x(sat):
     targetdir=f"{sat}/tiles"
@@ -71,15 +80,16 @@ def get_latest_full_disk_image(sat='meteosat-8'):
         if not os.path.exists(filename):
             if 'meteosat' in sat:
                 get_cira_tiles(datestr, filename, sat, targetdir)
-            elif sat in fulldiskurls.keys():
-                processes.append(executor.submit(getimage, filename, fulldiskurls[sat]))
+            elif sat in satinfo.keys():
+                processes.append(executor.submit(getimage, filename, satinfo[sat]['url']))
             else:
                 raise ValueError(f"{sat} not implemented")
     for future in concurrent.futures.as_completed(processes):
-        print(future.result())
+        _ = future.result()
     img = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
     resized = cv2.resize(img, (image_width,image_height), interpolation=cv2.INTER_AREA)
     cv2.imwrite(filename, resized)
+    maskup(filename)
     shutil.rmtree(targetdir)
     return filename
 
@@ -107,3 +117,41 @@ def getimage(filename, url):
                 r.raw.decode_content = True
                 shutil.copyfileobj(r.raw, f)
     return returncode
+
+def label_image(filename, sat):
+    image = cv2.imread(filename)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    line1 = (round(image.shape[0]*.03), round(image.shape[1]*.93))
+    line2 = (round(image.shape[0]*.03), round(image.shape[1]*.96))
+    fontScale = round(image.shape[0]/1000)
+    color = (255, 255, 255)
+    thickness = round(image.shape[0]/2000)
+    image = cv2.putText(image, satinfo[sat.lower()]['name'], line1, font, fontScale, color, thickness, cv2.LINE_AA)
+    image = cv2.putText(image, satinfo[sat.lower()]['longitude'].replace('º', '\u00B0'), line2, font, fontScale, color, thickness, cv2.LINE_AA)
+    resized = cv2.resize(image, (640, 640), interpolation=cv2.INTER_AREA)
+    cv2.imwrite(filename, resized)
+    return filename
+
+
+def maskup(filename):
+    im = cv2.imread(filename)
+    im_mask = cv2.imread('mask.png')
+    # resized = cv2.resize(im_mask, (image_width,image_height), interpolation=cv2.INTER_AREA)
+    if im.shape != im_mask.shape:
+        resized = cv2.resize(im_mask, (image_width, image_height), interpolation=cv2.INTER_AREA)
+        cv2.imwrite('/tmp/mask.png', resized)
+        im_mask = cv2.imread('/tmp/mask.png')
+
+    added_image = cv2.bitwise_and(im, im_mask)
+    cv2.imwrite(filename, added_image)
+    return filename
+
+def buildcollage():
+    images=[]
+    for sat in ['meteosat-8', 'himawari', 'goes-17', 'goes-16', 'meteosat-11', ]:
+        satfilename = get_latest_full_disk_image(sat=sat)
+        im = cv2.imread(satfilename)
+        print(im.shape)
+        images.append(cv2.imread(satfilename))
+    im_colage = cv2.hconcat(images)
+    cv2.imwrite('foo.jpg', im_colage)
