@@ -1,0 +1,9 @@
+**.DS_Store
+**.jpg
+**.png
+**.sqlite
+**.swp
+.DS_Store
+.idea/
+sources.json
+venv/
